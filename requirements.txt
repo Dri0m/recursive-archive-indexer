@@ -1,0 +1,8 @@
+wheel
+py7zr
+python-dotenv
+colorlog
+pytest
+fastapi
+uvicorn
+python-multipart
