@@ -6,3 +6,6 @@ pytest
 fastapi
 uvicorn
 python-multipart
+rarfile
+warcio
+parse
