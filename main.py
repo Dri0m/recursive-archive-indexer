@@ -74,9 +74,9 @@ def recurse(filename, tmp_dir, max_recursion, current_recursion, result, filenam
 def new_entry(name: str, size_compressed: int, size_uncompressed: int, real_path: str) -> dict:
     return {
         "name": name,
-        "sc": size_compressed,
-        "su": size_uncompressed,
-        "fo": exec_file_util(real_path),
+        "size_compressed": size_compressed,
+        "size_uncompressed": size_uncompressed,
+        "file_util_output": exec_file_util(real_path),
     }
 
 
@@ -107,7 +107,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                     archive.reset()
 
                     entry = new_entry(full_filename,
-                                      file_info.compressed if file_info.compressed is not None else file_info.uncompressed,
+                                      file_info.compressed if file_info.compressed is not None else -1,
                                       file_info.uncompressed,
                                       f"{tmp_dir}/{file_info.filename}")
                     result["files"].append(entry)
@@ -166,7 +166,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                     l.debug(f"extracting '{full_filename}' into '{tmp_dir}'")
                     archive.extract(member=file_info.name, path=tmp_dir)
 
-                    entry = new_entry(full_filename, file_info.size, file_info.size,
+                    entry = new_entry(full_filename, -1, file_info.size,
                                       f"{tmp_dir}/{file_info.name}")
 
                     result["files"].append(entry)
@@ -189,18 +189,21 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                             with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
                                 uri = record.rec_headers.get_header('WARC-Target-URI')
                                 content_disposition = record.rec_headers.get_header('Content-Disposition')
-                                content_disposition_filename = None
+                                content_disposition_filename = ""
                                 if content_disposition:
-                                    content_disposition_filename = parse.search('filename="{}";', content_disposition)
-                                    if content_disposition_filename:
-                                        content_disposition_filename = content_disposition_filename[0]
+                                    cdf = parse.search('filename="{}";', content_disposition)
+                                    if cdf:
+                                        content_disposition_filename = cdf[0]
 
                                 real_path = f"{tmp_dir}/file"
 
-                                full_filename = f"{filename_prefix_recursive}/{uri}"
-
                                 fake_filename = '/'.join(
-                                    uri.split('//')[1].split('/')[0:-1]) + "cd-" + content_disposition_filename
+                                    uri.split('//')[1].split('/')[0:-1])
+
+                                if len(content_disposition_filename) > 0:
+                                    fake_filename += "cd-" + content_disposition_filename
+
+                                full_filename = f"{filename_prefix_recursive}/{fake_filename}"
 
                                 with open(real_path, 'wb') as f:
                                     f.write(record.content_stream().read())
@@ -209,7 +212,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                                 entry = new_entry(full_filename, size, size, real_path)
                                 result["files"].append(entry)
 
-                                recurse(fake_filename, tmp_dir, max_recursion, current_recursion, result, full_filename)
+                                recurse("file", tmp_dir, max_recursion, current_recursion, result, full_filename)
                     except Exception as e:
                         l.exception(e)
                         continue
@@ -222,8 +225,9 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
     return result
 
 
-# index_archive(pathlib.Path("outsider.7z"), 2)
-data = index_archive(pathlib.Path("hitoikigame.com.tar"), 1)
+# data = index_archive(pathlib.Path("recursive-archive-indexer.zip"), 3)
+# data = index_archive(pathlib.Path("hitoikigame.com.tar"), 3)
+data = index_archive(pathlib.Path("www.pozirk.com-2018-11-13-afad9644-00000.warc.gz"), 1)
 
 l.debug(data)
 l.debug(len(data["files"]))
