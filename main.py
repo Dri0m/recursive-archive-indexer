@@ -49,8 +49,7 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
     return {
         "archive_filename": file.filename,
         "archive_size": file,
-        "archive_size_uncompressed": None,
-        "files": data["files"] if data is not None else None,
+        "files": data["files"] if data is not None else [],
         "exec_file_output": exec_file_util(str(new_filepath)),
     }
 
