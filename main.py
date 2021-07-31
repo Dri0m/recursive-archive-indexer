@@ -32,8 +32,6 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
             l.debug(f"copying file '{file.filename}' into '{new_filepath}'")
             shutil.copyfileobj(file.file, dest)
 
-        exec_file_output = exec_file_util(str(new_filepath))
-
         try:
             l.debug(f"indexing file '{new_filepath}'")
             data = index_archive(new_filepath, 4)
@@ -51,7 +49,6 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
         "archive_filename": file.filename,
         "archive_size": file,
         "files": data["files"] if data is not None else [],
-        "exec_file_output": exec_file_output,
     }
 
 
