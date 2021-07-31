@@ -1,3 +1,4 @@
+import hashlib
 import os
 import pathlib
 import pdb
@@ -6,7 +7,7 @@ import tarfile
 import tempfile
 import traceback
 import zipfile
-from typing import Optional
+from typing import Optional, Tuple
 
 import parse
 import py7zr
@@ -34,7 +35,7 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
 
         try:
             l.debug(f"indexing file '{new_filepath}'")
-            data = index_archive(new_filepath, 2)
+            data = index_archive(new_filepath, 4)
         except Exception as e:
             response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
             return {
@@ -52,6 +53,23 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
         "files": data["files"] if data is not None else None,
         "exec_file_output": exec_file_util(str(new_filepath)),
     }
+
+
+def hash_file(filename) -> Tuple[str, str]:
+    BUF_SIZE = 2 ** 24  # 16MiB
+
+    sha256 = hashlib.sha256()
+    md5 = hashlib.md5()
+
+    with open(filename, 'rb') as f:
+        while True:
+            data = f.read(BUF_SIZE)
+            if not data:
+                break
+            sha256.update(data)
+            md5.update(data)
+
+    return sha256.hexdigest(), md5.hexdigest()
 
 
 def exec_file_util(real_filepath: str) -> str:
@@ -72,11 +90,16 @@ def recurse(filename, tmp_dir, max_recursion, current_recursion, result, filenam
 
 
 def new_entry(name: str, size_compressed: int, size_uncompressed: int, real_path: str) -> dict:
+    file_util_output = exec_file_util(real_path)
+    sha256, md5 = hash_file(real_path)
+
     return {
         "name": name,
         "size_compressed": size_compressed,
         "size_uncompressed": size_uncompressed,
-        "file_util_output": exec_file_util(real_path),
+        "file_util_output": file_util_output,
+        "sha256": sha256,
+        "md5": md5,
     }
 
 
@@ -112,7 +135,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                                       f"{tmp_dir}/{file_info.filename}")
                     result["files"].append(entry)
 
-                    recurse("file", tmp_dir, max_recursion, current_recursion, result,
+                    recurse(file_info.filename, tmp_dir, max_recursion, current_recursion, result,
                             full_filename)
             except Exception as e:
                 l.exception(e)
@@ -223,11 +246,3 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
         return None
 
     return result
-
-
-# data = index_archive(pathlib.Path("recursive-archive-indexer.zip"), 3)
-# data = index_archive(pathlib.Path("hitoikigame.com.tar"), 3)
-data = index_archive(pathlib.Path("www.pozirk.com-2018-11-13-afad9644-00000.warc.gz"), 1)
-
-l.debug(data)
-l.debug(len(data["files"]))
