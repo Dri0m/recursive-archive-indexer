@@ -27,7 +27,15 @@ app = FastAPI()
 async def create_upload_file(response: Response, file: UploadFile = File(...)):
     l.debug(f"received file '{file.filename}'")
     with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as base_path:
-        new_filepath = pathlib.Path(base_path + "/file" + pathlib.Path(file.filename).suffix)
+
+        if file.filename.endswith(".warc.gz"):
+            suffix = ".warc.gz"
+        elif file.filename.endswith(".arc.gz"):
+            suffix = ".arc.gz"
+        else:
+            suffix = pathlib.Path(file.filename).suffix
+
+        new_filepath = pathlib.Path(base_path + "/file" + suffix)
         with open(new_filepath, "wb") as dest:
             l.debug(f"copying file '{file.filename}' into '{new_filepath}'")
             shutil.copyfileobj(file.file, dest)
