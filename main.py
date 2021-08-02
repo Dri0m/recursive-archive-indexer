@@ -56,6 +56,7 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
     return {
         "archive_filename": file.filename,
         "files": data["files"] if data is not None else [],
+        "indexing_errors": data["indexing_errors"],
     }
 
 
@@ -115,6 +116,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
 
     result = {
         "files": [],
+        "indexing_errors": 0
     }
 
     if py7zr.is_7zfile(filepath):
@@ -143,6 +145,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                             full_filename)
             except Exception as e:
                 l.exception(e)
+                result["indexing_errors"] += 1
                 continue
 
     elif zipfile.is_zipfile(filepath) or rarfile.is_rarfile(filepath) or rarfile.is_rarfile_sfx(filepath):
@@ -175,6 +178,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                             full_filename)
             except Exception as e:
                 l.exception(e)
+                result["indexing_errors"] += 1
                 continue
 
     elif tarfile.is_tarfile(filepath):
@@ -202,6 +206,7 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                             full_filename)
             except Exception as e:
                 l.exception(e)
+                result["indexing_errors"] += 1
                 continue
 
     elif str(filepath).endswith(".warc") or \
@@ -242,10 +247,12 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
                                 recurse("file", tmp_dir, max_recursion, current_recursion, result, full_filename)
                     except Exception as e:
                         l.exception(e)
+                        result["indexing_errors"] += 1
                         continue
 
             except Exception as e:
                 l.exception(e)
+                result["indexing_errors"] += 1
     else:
         return None
 
