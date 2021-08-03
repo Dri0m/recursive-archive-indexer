@@ -9,3 +9,4 @@ python-multipart
 rarfile
 warcio
 parse
+pyzstd

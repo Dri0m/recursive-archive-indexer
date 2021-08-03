@@ -14,6 +14,7 @@ import rarfile
 from fastapi import FastAPI, File, UploadFile, Response, status
 import shutil
 
+from pyzstd import ZstdFile
 from warcio import ArchiveIterator
 
 from logger import getLogger
@@ -32,6 +33,16 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
             suffix = ".warc.gz"
         elif file.filename.endswith(".arc.gz"):
             suffix = ".arc.gz"
+        elif file.filename.endswith(".tar.gz"):
+            suffix = ".tar.gz"
+        elif file.filename.endswith(".tar.bz2"):
+            suffix = ".tar.bz2"
+        elif file.filename.endswith(".tar.xz"):
+            suffix = ".tar.xz"
+        elif file.filename.endswith(".tar.zst"):
+            suffix = ".tar.zst"
+        elif file.filename.endswith(".tar.zstd"):
+            suffix = ".tar.zstd"
         else:
             suffix = pathlib.Path(file.filename).suffix
 
@@ -58,6 +69,20 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
         "files": data["files"] if data is not None else [],
         "indexing_errors": data["indexing_errors"],
     }
+
+
+class ZstdTarFile(tarfile.TarFile):
+    def __init__(self, name, mode='r', *, level_or_option=None, zstd_dict=None, **kwargs):
+        l.debug("attempting to open a zstandard tar file")
+
+        self.zstd_file = ZstdFile(name, mode,
+                                  level_or_option=level_or_option,
+                                  zstd_dict=zstd_dict)
+        try:
+            super().__init__(fileobj=self.zstd_file, mode=mode, **kwargs)
+        except:
+            self.zstd_file.close()
+            raise
 
 
 def hash_file(filename) -> Tuple[str, str]:
@@ -119,141 +144,159 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
         "indexing_errors": 0
     }
 
-    if py7zr.is_7zfile(filepath):
-        archive = py7zr.SevenZipFile(filepath, mode='r')
-        file_infos = archive.list()
+    try:
+        if py7zr.is_7zfile(filepath):
+            archive = py7zr.SevenZipFile(filepath, mode='r')
+            file_infos = archive.list()
 
-        for file_info in file_infos:
-            try:
-                if file_info.is_directory:
-                    l.debug(f"skipping directory entry '{file_info.filename}'")
-                    continue
-                with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
-                    full_filename = f"{filename_prefix_recursive}/{file_info.filename}"
-
-                    l.debug(f"extracting '{file_info.filename}' into '{tmp_dir}'")
-                    archive.extract(path=tmp_dir, targets=[file_info.filename])
-                    archive.reset()
-
-                    entry = new_entry(full_filename,
-                                      file_info.compressed if file_info.compressed is not None else -1,
-                                      file_info.uncompressed,
-                                      f"{tmp_dir}/{file_info.filename}")
-                    result["files"].append(entry)
-
-                    recurse(file_info.filename, tmp_dir, max_recursion, current_recursion, result,
-                            full_filename)
-            except Exception as e:
-                l.exception(e)
-                result["indexing_errors"] += 1
-                continue
-
-    elif zipfile.is_zipfile(filepath) or rarfile.is_rarfile(filepath) or rarfile.is_rarfile_sfx(filepath):
-        if zipfile.is_zipfile(filepath):
-            archive = zipfile.ZipFile(filepath, mode='r')
-        else:
-            archive = rarfile.RarFile(filepath, mode='r')
-
-        file_infos = archive.infolist()
-
-        for file_info in file_infos:
-            try:
-                if file_info.is_dir():
-                    l.debug(f"skipping directory entry '{file_info.filename}'")
-                    continue
-                with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
-                    full_filename = f"{filename_prefix_recursive}/{file_info.filename}"
-
-                    l.debug(f"extracting '{full_filename}' into '{tmp_dir}'")
-                    archive.extract(member=file_info.filename, path=tmp_dir)
-
-                    entry = new_entry(full_filename,
-                                      file_info.compress_size,
-                                      file_info.file_size,
-                                      f"{tmp_dir}/{file_info.filename}")
-
-                    result["files"].append(entry)
-
-                    recurse(file_info.filename, tmp_dir, max_recursion, current_recursion, result,
-                            full_filename)
-            except Exception as e:
-                l.exception(e)
-                result["indexing_errors"] += 1
-                continue
-
-    elif tarfile.is_tarfile(filepath):
-        archive = tarfile.TarFile(filepath, mode='r')
-
-        file_infos = archive.getmembers()
-
-        for file_info in file_infos:
-            try:
-                if file_info.isdir():
-                    l.debug(f"skipping directory entry '{file_info.name}'")
-                    continue
-                with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
-                    full_filename = f"{filename_prefix_recursive}/{file_info.name}"
-
-                    l.debug(f"extracting '{full_filename}' into '{tmp_dir}'")
-                    archive.extract(member=file_info.name, path=tmp_dir)
-
-                    entry = new_entry(full_filename, -1, file_info.size,
-                                      f"{tmp_dir}/{file_info.name}")
-
-                    result["files"].append(entry)
-
-                    recurse(file_info.name, tmp_dir, max_recursion, current_recursion, result,
-                            full_filename)
-            except Exception as e:
-                l.exception(e)
-                result["indexing_errors"] += 1
-                continue
-
-    elif str(filepath).endswith(".warc") or \
-            str(filepath).endswith(".arc") or \
-            str(filepath).endswith(".warc.gz") or \
-            str(filepath).endswith(".arc.gz"):
-        with open(filepath, 'rb') as stream:
-            try:
-                for record in ArchiveIterator(stream):
-                    try:
-                        if record.rec_type == 'response':
-                            with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
-                                uri = record.rec_headers.get_header('WARC-Target-URI')
-                                content_disposition = record.rec_headers.get_header('Content-Disposition')
-                                content_disposition_filename = ""
-                                if content_disposition:
-                                    cdf = parse.search('filename="{}";', content_disposition)
-                                    if cdf:
-                                        content_disposition_filename = cdf[0]
-
-                                real_path = f"{tmp_dir}/file"
-
-                                fake_filename = '/'.join(
-                                    uri.split('//')[1].split('/')[0:-1])
-
-                                if len(content_disposition_filename) > 0:
-                                    fake_filename += "cd-" + content_disposition_filename
-
-                                full_filename = f"{filename_prefix_recursive}/{fake_filename}"
-
-                                with open(real_path, 'wb') as f:
-                                    f.write(record.content_stream().read())
-                                    size = f.tell()
-
-                                entry = new_entry(full_filename, size, size, real_path)
-                                result["files"].append(entry)
-
-                                recurse("file", tmp_dir, max_recursion, current_recursion, result, full_filename)
-                    except Exception as e:
-                        l.exception(e)
-                        result["indexing_errors"] += 1
+            for file_info in file_infos:
+                try:
+                    if file_info.is_directory:
+                        l.debug(f"skipping directory entry '{file_info.filename}'")
                         continue
+                    with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
+                        full_filename = f"{filename_prefix_recursive}/{file_info.filename}"
 
-            except Exception as e:
-                l.exception(e)
-                result["indexing_errors"] += 1
-    else:
-        return None
+                        l.debug(f"extracting '{file_info.filename}' into '{tmp_dir}'")
+                        archive.extract(path=tmp_dir, targets=[file_info.filename])
+                        archive.reset()
+
+                        entry = new_entry(full_filename,
+                                          file_info.compressed if file_info.compressed is not None else -1,
+                                          file_info.uncompressed,
+                                          f"{tmp_dir}/{file_info.filename}")
+                        result["files"].append(entry)
+
+                        recurse(file_info.filename, tmp_dir, max_recursion, current_recursion, result,
+                                full_filename)
+                except Exception as e:
+                    l.exception(e)
+                    result["indexing_errors"] += 1
+                    continue
+
+        elif zipfile.is_zipfile(filepath) or rarfile.is_rarfile(filepath) or rarfile.is_rarfile_sfx(filepath):
+            if zipfile.is_zipfile(filepath):
+                archive = zipfile.ZipFile(filepath, mode='r')
+            else:
+                archive = rarfile.RarFile(filepath, mode='r')
+
+            file_infos = archive.infolist()
+
+            for file_info in file_infos:
+                try:
+                    if file_info.is_dir():
+                        l.debug(f"skipping directory entry '{file_info.filename}'")
+                        continue
+                    with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
+                        full_filename = f"{filename_prefix_recursive}/{file_info.filename}"
+
+                        l.debug(f"extracting '{full_filename}' into '{tmp_dir}'")
+                        archive.extract(member=file_info.filename, path=tmp_dir)
+
+                        entry = new_entry(full_filename,
+                                          file_info.compress_size,
+                                          file_info.file_size,
+                                          f"{tmp_dir}/{file_info.filename}")
+
+                        result["files"].append(entry)
+
+                        recurse(file_info.filename, tmp_dir, max_recursion, current_recursion, result,
+                                full_filename)
+                except Exception as e:
+                    l.exception(e)
+                    result["indexing_errors"] += 1
+                    continue
+
+        elif tarfile.is_tarfile(filepath) or \
+                str(filepath).endswith(".tar.gz") or \
+                str(filepath).endswith(".tar.bz2") or \
+                str(filepath).endswith(".tar.xz") or \
+                str(filepath).endswith(".tar.zst") or \
+                str(filepath).endswith(".tar.zstd"):
+
+            if str(filepath).endswith(".tar.zst") or str(filepath).endswith(".tar.zstd"):
+                # https://pyzstd.readthedocs.io/en/latest/index.html?highlight=tarfile#use-with-tarfile-module
+                # this is gonna be slow
+                archive = ZstdTarFile(filepath, mode='r')
+            else:
+                archive = tarfile.open(filepath, mode='r')
+
+            file_infos = archive.getmembers()
+
+            for file_info in file_infos:
+                try:
+                    if file_info.isdir():
+                        l.debug(f"skipping directory entry '{file_info.name}'")
+                        continue
+                    with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
+                        full_filename = f"{filename_prefix_recursive}/{file_info.name}"
+
+                        l.debug(f"extracting '{full_filename}' into '{tmp_dir}'")
+                        archive.extract(member=file_info.name, path=tmp_dir)
+
+                        entry = new_entry(full_filename, -1, file_info.size,
+                                          f"{tmp_dir}/{file_info.name}")
+
+                        result["files"].append(entry)
+
+                        recurse(file_info.name, tmp_dir, max_recursion, current_recursion, result,
+                                full_filename)
+                except Exception as e:
+                    l.exception(e)
+                    result["indexing_errors"] += 1
+                    continue
+
+        elif str(filepath).endswith(".warc") or \
+                str(filepath).endswith(".arc") or \
+                str(filepath).endswith(".warc.gz") or \
+                str(filepath).endswith(".arc.gz"):
+            with open(filepath, 'rb') as stream:
+                try:
+                    for record in ArchiveIterator(stream):
+                        try:
+                            if record.rec_type == 'response':
+                                with tempfile.TemporaryDirectory(prefix="recursive_archive_indexer_") as tmp_dir:
+                                    uri = record.rec_headers.get_header('WARC-Target-URI')
+                                    content_disposition = record.rec_headers.get_header('Content-Disposition')
+                                    content_disposition_filename = ""
+                                    if content_disposition:
+                                        cdf = parse.search('filename="{}";', content_disposition)
+                                        if cdf:
+                                            content_disposition_filename = cdf[0]
+
+                                    real_path = f"{tmp_dir}/file"
+
+                                    fake_filename = '/'.join(
+                                        uri.split('//')[1].split('/')[0:-1])
+
+                                    if len(content_disposition_filename) > 0:
+                                        fake_filename += "cd-" + content_disposition_filename
+
+                                    full_filename = f"{filename_prefix_recursive}/{fake_filename}"
+
+                                    with open(real_path, 'wb') as f:
+                                        f.write(record.content_stream().read())
+                                        size = f.tell()
+
+                                    entry = new_entry(full_filename, size, size, real_path)
+                                    result["files"].append(entry)
+
+                                    recurse("file", tmp_dir, max_recursion, current_recursion, result, full_filename)
+                        except Exception as e:
+                            l.exception(e)
+                            result["indexing_errors"] += 1
+                            continue
+
+                except Exception as e:
+                    l.exception(e)
+                    result["indexing_errors"] += 1
+        else:
+            return None
+    except Exception as e:
+        l.exception(e)
+        result["indexing_errors"] += 1
 
     return result
+
+
+l.debug(index_archive(pathlib.Path("test.tgz"), 4))
