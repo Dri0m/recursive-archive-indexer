@@ -297,6 +297,3 @@ def index_archive(filepath: pathlib.Path, max_recursion: int, current_recursion:
         result["indexing_errors"] += 1
 
     return result
-
-
-l.debug(index_archive(pathlib.Path("test.tgz"), 4))
