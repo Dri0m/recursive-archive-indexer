@@ -48,6 +48,30 @@ async def create_upload_file(response: Response, file: UploadFile = File(...)):
     }
 
 
+# just hand over absolute path to the file instead of uploading it, saves some unnecessary copying ay?
+@app.post("/provide-path")
+async def create_upload_file(response: Response, path: str):
+    try:
+        with open(path, 'rb') as f:
+            l.debug(f"indexing file '{path}'")
+            data = index_archive(pathlib.Path(path), 4, file_object=f)
+    except Exception as e:
+        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return {
+            "exception": "".join(
+                traceback.format_exception(
+                    etype=type(e), value=e, tb=e.__traceback__
+                )
+            )
+        }
+
+    return {
+        "archive_filename": f.name,
+        "files": data["files"] if data is not None else [],
+        "indexing_errors": data["indexing_errors"],
+    }
+
+
 class ArchiveType(Enum):
     SEVEN_ZIP = 1
     ZIP = 2
