@@ -14,3 +14,4 @@ It can read `.7z, .zip, .rar, .tar, .tar.gz, .tar.bz2, .tar.xz, .tar.zst .tar.zs
 - `py7zr` doesn't seem to accept `tempfile.SpooledTemporaryFile` as a valid file object, so you can't really use the multipart upload endpoint right now (without copying the file, which is crappy)
 - no test suite
 - i improve it as i use it, so there most like are some bugs and issues
+- i am 100% sure i'm not closing some files correctly
