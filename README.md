@@ -2,6 +2,8 @@
 
 A tiny microservice thingy that, slightly inefficiently, returns file list and metadata of certain file archives. That's it.
 
+It can read `.7z, .zip, .rar, .tar, .tar.gz, .tar.bz2, .tar.xz, .tar.zst .tar.zstd, .tgz, .warc, .arc, .warc.gz, .arc.gz`, if available, it detects the filetype via magic nubmers and headers and stuff, otherwise it's using file extensions.
+
 ## how to use
 - requires `file` command to be present in PATH, otherwise it will spit errors (but it will work)
 - the service is using fastapi for the server stuff, my preferred way of running these is `python -m uvicorn main:app --host $IP --port $PORT --workers $WORKER_COUNT`
