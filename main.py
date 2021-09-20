@@ -259,6 +259,12 @@ class ZstdTarFile(tarfile.TarFile):
             self.zstd_file.close()
             raise
 
+    def close(self):
+        try:
+            super().close()
+        finally:
+            self.zstd_file.close()
+
 
 def hash_file(filename) -> Tuple[str, str]:
     BUF_SIZE = 2 ** 24  # 16MiB
