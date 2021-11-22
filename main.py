@@ -25,6 +25,8 @@ l = getLogger("api")
 app = FastAPI()
 
 
+from pathlib import Path
+
 @app.post("/upload")
 async def create_upload_file(response: Response, file: UploadFile = File(...)):
     l.debug(f"received file '{file.filename}'")
@@ -64,6 +66,8 @@ async def create_upload_file(response: Response, path: str):
                 )
             )
         }
+
+    print(data["files"])
 
     return {
         "archive_filename": f.name,
@@ -296,8 +300,7 @@ def new_entry(name: str, real_path: str) -> dict:
     file_util_output = exec_file_util(real_path)
     sha256, md5 = hash_file(real_path)
 
-    with open(real_path, "rb") as f:
-        size_uncompressed = f.tell()
+    size_uncompressed = Path(real_path).stat().st_size
 
     return {
         "name": name,
