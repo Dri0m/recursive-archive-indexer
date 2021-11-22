@@ -67,8 +67,6 @@ async def create_upload_file(response: Response, path: str):
             )
         }
 
-    print(data["files"])
-
     return {
         "archive_filename": f.name,
         "files": data["files"] if data is not None else [],
