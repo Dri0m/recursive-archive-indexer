@@ -10,6 +10,14 @@ It can read `.7z, .zip, .rar, .tar, .tar.gz, .tar.bz2, .tar.xz, .tar.zst .tar.zs
 - or call the indexing method directly and handle the output yourself
 - the `index_archive` returns a flattened list of recursively listed file entries and the count of exceptions that occured during the process
 
+
+### Run with Docker
+First build the image using the Dockerfile
+- `docker build -t recursive-archive-indexer .`
+
+Now you can run the image. Use the environment variable `WEB_CONCURRENCY` to set the number of workers.
+- `docker run -d --name recursive-archive-indexer -p 8372:8000 -e WEB_CONCURRENCY=4 recursive-archive-indexer`
+
 ## known issues
 - `py7zr` doesn't seem to accept `tempfile.SpooledTemporaryFile` as a valid file object, so you can't really use the multipart upload endpoint right now (without copying the file, which is crappy)
 - no test suite
